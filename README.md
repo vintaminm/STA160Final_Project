@@ -1,4 +1,5 @@
 # STA160Final_Project
+**Note:** The LSTM analysis section is implemented in Python and is provided as a separate Python file (`LuxuryLSTM.py`). The ARIMAX portion and other analyses are conducted in R.
 
 # The Impact of Economic Indicators on Luxury Market Growth
 
@@ -12,7 +13,7 @@ This project investigates how various economic indicators influence the growth o
 
 ## Data
 
-- **File:** `merged_luxury_indicators.csv`  
+- **File:** `merged_luxury_indicators.csv`
 - **Description:** This file contains annual luxury market growth data along with various economic indicators, such as GDP growth, income growth, Gini changes, and others.  
 - **Variables:**  
   - **Year:** The calendar year of the observation.  
