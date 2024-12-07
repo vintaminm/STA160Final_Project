@@ -1,0 +1,510 @@
+---
+title: "The Impact of Economic Indicators on Luxury Market Growth: An ARIMAX Model Analysis and Forecast"
+author: "zs"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: tango
+  html_document:
+    toc: true
+    df_print: paged
+header-includes:
+  - \usepackage{ctex}
+  - \usepackage{float}
+  - \usepackage{booktabs}
+  - \usepackage{caption}
+  - \usepackage{graphicx}
+  - \usepackage{amsmath}
+  - \usepackage{hyperref}
+---
+
+
+```{r setup, include=FALSE}
+# Basic setup and hide code output where necessary and set global plotting and directory options.
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/downloads") # Adjust this working directory based on your environment.
+
+
+```
+
+```{r load_packages, message=FALSE}
+# Load required packages
+library(tidyverse)   # For data manipulation and visualization
+library(corrplot)    # For correlation matrix plotting
+library(forecast)    # For time series forecasting methods
+library(lmtest)
+library(changepoint) # For structural break analysis (not extensively used here, but can be helpful)
+library(zoo)         # For handling time series data
+library(tseries)     # For stationarity tests (ADF)
+library(xts)
+
+```
+
+```{r data_import}
+# Import the merged dataset containing luxury market growth and related indicators.
+merged_data <- read.csv("merged_luxury_indicators.csv")
+
+# Extract only the Year and Growth_Rate columns, and filter out missing values
+luxury_points <- merged_data %>%
+  dplyr::select(Year, Growth_Rate) %>%
+  filter(!is.na(Growth_Rate))
+
+```
+
+
+```{r data_exploration}
+# Print the range of years available in the dataset
+print("Data time range:")
+print(range(merged_data$Year))
+
+# Print how many observations are available for each year
+print("Number of observations per year:")
+print(table(merged_data$Year))
+```
+
+```{r histogram_density}
+# Check the structure of the luxury_points data frame to ensure proper data preparation
+str(luxury_points)
+```
+
+
+```{r histogram_density_plot}
+# Pivot the dataset from wide to long format, making it easier to plot multiple indicators over time
+merged_long <- merged_data %>%
+  tidyr::pivot_longer(
+    cols = -Year, 
+    names_to = "Variable",
+    values_to = "Value"
+  )
+
+# Filter out the main growth rate (we only want to plot the other indicators)
+x_only_data <- merged_long %>% 
+  filter(Variable != "Growth_Rate")
+
+# Plot all indicators (except Growth_Rate) over time
+ggplot(x_only_data, aes(x = Year, y = Value, color = Variable)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "All Indicators Over Time (Excluding Luxury Growth)",
+    x = "Year",
+    y = "Value",
+    color = "Variable"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+
+# Save the plot for reference
+ggsave("x_variables_only_plot.pdf", width = 12, height = 6)
+
+```
+```{r pattern_analysis}
+# Compute annual mean and standard deviation of the Luxury Growth_Rate
+yearly_pattern <- luxury_points %>%
+  group_by(Year) %>%
+  summarise(
+    Mean = mean(Growth_Rate, na.rm = TRUE),
+    SD = sd(Growth_Rate, na.rm = TRUE),
+    Upper = Mean + SD,
+    Lower = Mean - SD,
+    .groups = 'drop'
+  )
+
+print(head(yearly_pattern))
+
+# Visualize the pattern of luxury market growth over time with mean and ±1 SD bands
+ggplot(yearly_pattern, aes(x = Year)) +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper),
+              fill = "#4477AA",
+              alpha = 0.2) +
+  geom_line(aes(y = Mean),
+            color = "#4477AA",
+            linewidth = 1) +
+  geom_point(aes(y = Mean),
+             color = "#4477AA",
+             size = 3) +
+  # Annotate known significant economic events
+  annotate("text", x = 2009, y = -15, 
+           label = "Financial\nCrisis", size = 3) +
+  annotate("text", x = 2020, y = -15, 
+           label = "COVID-19", size = 3) +
+  # Add a smoothed trend line for long-term patterns
+  geom_smooth(aes(y = Mean), 
+              method = "loess", 
+              color = "#EE6677",
+              se = FALSE,
+              linetype = "dashed") +
+  labs(title = "Luxury Market Growth Pattern (2003-2023)",
+       subtitle = "Annual means with ±1 SD confidence bands and trend line",
+       x = "Year",
+       y = "Growth Rate (%)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+
+ggsave("luxury_growth_pattern.pdf", width = 12, height = 6)
+
+```
+
+
+```{r data_check}
+# Basic data checks: the range of years, growth rate values, and number of data points
+cat("Data range checks:\n")
+cat("Year range:", range(luxury_points$Year), "\n")
+cat("Growth rate range:", range(luxury_points$Growth_Rate), "\n")
+cat("Number of data points:", nrow(luxury_points), "\n")
+```
+
+```{r correlation_analysis}
+# Calculate correlation among selected indicators
+selected_cols <- c("Growth_Rate", "Top.10..Growth.Rate", "Top.1..Growth.Rate", 
+                   "Gini.Change.Rate", "Consumer.Sentiment.Growth.Rate", 
+                   "GDP.Growth.Rate", "Income.Growth.Rate", "Bottom.50..Growth.Rate")
+
+correlation_matrix <- cor(merged_data[, selected_cols], 
+                          use = "pairwise.complete.obs")
+
+# Plot a correlation matrix heatmap
+corrplot(correlation_matrix,
+         method = "color",
+         type = "upper",
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45,
+         col = colorRampPalette(c("#4477AA", "white", "#EE6677"))(200),
+         title = "Correlation Matrix of Growth Rates")
+
+ggsave("correlation_heatmap.pdf", width = 10, height = 8)
+
+# A full period correlation plot saved to PDF
+pdf("correlation_heatmap_full_period.pdf", width = 12, height = 12)
+corrplot(correlation_matrix,
+         method = "color",
+         type = "full",
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45,
+         col = colorRampPalette(c("#4477AA", "white", "#EE6677"))(200),
+         title = "Correlation Plot (2003-2023)")
+dev.off()
+
+# Arrange indicators by absolute correlation with the main luxury growth rate
+correlations_with_growth <- correlation_matrix["Growth_Rate", -1]
+corr_df <- data.frame(
+  Indicator = names(correlations_with_growth),
+  Correlation = correlations_with_growth,
+  Abs_Correlation = abs(correlations_with_growth)
+) %>%
+  arrange(desc(Abs_Correlation))
+
+# Bar plot to show the strength of correlation with luxury growth
+ggplot(corr_df, aes(x = reorder(Indicator, Abs_Correlation), y = Correlation)) +
+  geom_bar(stat = "identity", 
+           fill = ifelse(corr_df$Correlation > 0, "#4477AA", "#EE6677")) +
+  coord_flip() +
+  labs(title = "Correlation Strength with Luxury Growth (2003-2023)",
+       x = "Indicators",
+       y = "Correlation Coefficient") +
+  theme_minimal()
+
+ggsave("correlation_strength_full_period.pdf", width = 10, height = 8)
+
+```
+```{r time_series_prep}
+# Prepare annual mean growth data as a time series
+ts_data <- luxury_points %>%
+  group_by(Year) %>%
+  summarise(Mean_Growth = mean(Growth_Rate, na.rm = TRUE))
+
+ts_growth <- ts(na.omit(ts_data$Mean_Growth), 
+                start = min(ts_data$Year[!is.na(ts_data$Mean_Growth)]))
+
+print("Time series summary:")
+print(summary(ts_growth))
+print("Time series range:")
+print(range(time(ts_growth)))
+```
+
+```{r time_series_visualization}
+# Visualize the time series, its first difference, and its density
+par(mfrow = c(3,1), mar = c(4,4,2,2))
+
+# Original time series
+plot(ts_growth, type = "l", main = "Growth Rate Level",
+     xlab = "Year", ylab = "Growth Rate")
+abline(h = mean(ts_growth), col = "red", lty = 2)
+
+# First difference to check stationarity
+plot(diff(ts_growth), type = "l", main = "First Difference of Growth Rate",
+     xlab = "Year", ylab = "Difference")
+abline(h = 0, col = "red", lty = 2)
+
+# Density plot of the growth rate distribution
+plot(density(ts_growth), main = "Density Plot of Growth Rate",
+     xlab = "Growth Rate", ylab = "Density")
+abline(v = mean(ts_growth), col = "red", lty = 2)
+
+# Autocorrelation and Partial Autocorrelation functions
+par(mfrow = c(1,2))
+acf(ts_growth, main="ACF")
+pacf(ts_growth, main="PACF")
+
+```
+
+```{r stationarity_tests}
+# Perform stationarity tests: ADF (Augmented Dickey-Fuller) and KPSS tests
+adf_result <- adf.test(ts_growth)
+kpss_result <- kpss.test(ts_growth)
+
+print("ADF Test Results:")
+print(adf_result)
+
+print("KPSS Test Results:")
+print(kpss_result)
+```
+
+
+```{r model_preparation}
+# Aggregate the indicators at the annual level to create exogenous variables for the ARIMAX model
+yearly_indicators <- merged_data %>%
+  group_by(Year) %>%
+  summarise(
+    GDP = mean(GDP.Growth.Rate, na.rm = TRUE),
+    Gini = mean(Gini.Change.Rate, na.rm = TRUE),
+    Top1 = mean(Top.1..Growth.Rate, na.rm = TRUE),
+    Top10 = mean(Top.10..Growth.Rate, na.rm = TRUE),
+    Income = mean(Income.Growth.Rate, na.rm = TRUE),
+    Bottom50 = mean(Bottom.50..Growth.Rate, na.rm = TRUE),
+    Consumer = mean(Consumer.Sentiment.Growth.Rate, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Create different sets of external regressors (xreg) to test various hypotheses
+xreg1 <- cbind(GDP = yearly_indicators$GDP,
+               Gini = yearly_indicators$Gini)
+
+xreg2 <- cbind(GDP = yearly_indicators$GDP,
+               Gini = yearly_indicators$Gini,
+               Top1 = yearly_indicators$Top1,
+               Top10 = yearly_indicators$Top10)
+
+xreg3 <- cbind(Income = yearly_indicators$Income,
+               Bottom50 = yearly_indicators$Bottom50)
+
+xreg4 <- cbind(GDP = yearly_indicators$GDP,
+               Consumer = yearly_indicators$Consumer)
+
+xreg5 <- cbind(Top1 = yearly_indicators$Top1,
+               Bottom50 = yearly_indicators$Bottom50,
+               Gini = yearly_indicators$Gini)
+
+xreg6 <- cbind(GDP = yearly_indicators$GDP,
+               Gini = yearly_indicators$Gini,
+               Top1 = yearly_indicators$Top1)
+
+```
+
+```{r model_fitting}
+# Fit ARIMAX models using different sets of regressors
+# ARIMA order chosen as (2,1,1) here as a starting point
+models <- list(
+    model1 = Arima(ts_growth, order=c(2,1,1), xreg=xreg1),
+    model2 = Arima(ts_growth, order=c(2,1,1), xreg=xreg2),
+    model3 = Arima(ts_growth, order=c(2,1,1), xreg=xreg3),
+    model4 = Arima(ts_growth, order=c(2,1,1), xreg=xreg4),
+    model5 = Arima(ts_growth, order=c(2,1,1), xreg=xreg5),
+    model6 = Arima(ts_growth, order=c(2,1,1), xreg=xreg6)
+)
+
+# Compare models by AIC and BIC criteria
+results <- data.frame(
+    Model = c("Strong_Correlation(GDP+Gini)", 
+              "All_Positive(GDP+Gini+Top1+Top10)", 
+              "Negative(Income+Bottom50)", 
+              "GDP_Led(GDP+Consumer)",
+              "Inequality(Top1+Bottom50+Gini)",
+              "Comprehensive(GDP+Gini+Top1)"),
+    AIC = sapply(models, AIC),
+    BIC = sapply(models, BIC)
+)
+
+print("Model Comparison Results (sorted by AIC):")
+print(results[order(results$AIC),])
+
+```
+
+```{r model_diagnostics}
+# Evaluate model accuracy for each fitted model
+accuracy_results <- do.call(rbind, lapply(models, accuracy))
+rownames(accuracy_results) <- paste0("Model", 1:6)
+
+print("\nAccuracy Comparison:")
+print(accuracy_results)
+
+# Identify the best model by AIC
+best_model_index <- which.min(results$AIC)
+cat("\nDiagnostic Tests for Best Model (AIC):\n")
+
+# Check residuals of the best model (diagnostic plots and tests)
+checkresiduals(models[[best_model_index]])
+
+```
+
+
+```{r model_refinement}
+# We can try various ARIMA orders and test model diagnostics systematically
+
+arima_orders <- list(
+    c(1,1,1), c(2,1,1), c(2,1,2),
+    c(3,1,1), c(3,1,2), c(3,1,3),
+    c(2,1,3), c(1,1,2)
+)
+
+test_models <- function(xreg_data) {
+    results <- data.frame()
+    for(order in arima_orders) {
+        tryCatch({
+            model <- Arima(ts_growth, order=order, xreg=xreg_data)
+            
+            # Conduct residual diagnostics
+            lb_test <- Box.test(residuals(model), lag=10, type="Ljung-Box")
+            sw_test <- shapiro.test(residuals(model))
+            res <- residuals(model)
+            
+            # Breusch-Pagan test for heteroskedasticity
+            bp_data <- data.frame(
+                res = res^2,
+                xreg_data
+            )
+            bp_model <- lm(res ~ ., data=bp_data)
+            bp_test <- bptest(bp_model)
+            
+            # Consider a model "valid" if residuals pass these tests:
+            # 1. No autocorrelation (Ljung-Box p > 0.05)
+            # 2. Residuals are normally distributed (Shapiro-Wilk p > 0.05)
+            # 3. No heteroskedasticity (Breusch-Pagan p > 0.05)
+            if(lb_test$p.value > 0.05 && 
+               sw_test$p.value > 0.05 && 
+               bp_test$p.value > 0.05) {
+                
+                temp <- data.frame(
+                    AR = order[1],
+                    I = order[2],
+                    MA = order[3],
+                    AIC = AIC(model),
+                    BIC = BIC(model),
+                    LB_pvalue = lb_test$p.value,
+                    SW_pvalue = sw_test$p.value,
+                    BP_pvalue = bp_test$p.value,
+                    RMSE = sqrt(mean(res^2)),
+                    MAE = mean(abs(res))
+                )
+                results <- rbind(results, temp)
+            }
+        }, error = function(e) {
+            cat("Error with order", order, ":", conditionMessage(e), "\n")
+        })
+    }
+    return(results)
+}
+
+# Test refinements on the model with xreg2
+model2_results <- test_models(xreg2)
+
+if(nrow(model2_results) > 0) {
+    cat("\nValid Models (passing all diagnostic tests):\n")
+    print(model2_results[order(model2_results$AIC),])
+    
+    best_order_index <- which.min(model2_results$AIC)
+    best_order <- c(
+        model2_results$AR[best_order_index],
+        model2_results$I[best_order_index],
+        model2_results$MA[best_order_index]
+    )
+    
+    cat("\nBest ARIMA order (among valid models):", 
+        paste("AR=", best_order[1], 
+              ", I=", best_order[2], 
+              ", MA=", best_order[3]))
+    
+    cat("\n\nDiagnostic p-values for best model:")
+    cat("\nLjung-Box p-value:", model2_results$LB_pvalue[best_order_index])
+    cat("\nShapiro-Wilk p-value:", model2_results$SW_pvalue[best_order_index])
+    cat("\nBreusch-Pagan p-value:", model2_results$BP_pvalue[best_order_index])
+} else {
+    cat("\nNo models passed all diagnostic tests. Consider:")
+    cat("\n1. Different ARIMA orders")
+    cat("\n2. Data transformations")
+    cat("\n3. Different variable combinations")
+}
+
+```
+
+```{r final_model_diagnostics}
+final_model <- Arima(ts_growth, 
+                    order=c(2,1,1),
+                    xreg=xreg2)
+```
+
+
+```{r forecasting}
+ts_growth_2022 <- window(ts_growth, end=2022)
+xreg2_2022 <- xreg2[yearly_indicators$Year <= 2022, ]
+
+final_model_2022 <- Arima(ts_growth_2022, 
+                          order=c(2,1,1),
+                          xreg=xreg2_2022)
+
+future_xreg_2023 <- matrix(c(
+    6.59,    # 2023 GDP Growth Rate (example)
+    0,       # 2023 Gini Change Rate (example)
+    0.0574,  # 2023 Top1 Growth Rate (example)
+    0.0283   # 2023 Top10 Growth Rate (example)
+), nrow=1)
+
+forecast_2023 <- forecast(final_model_2022, 
+                          xreg=future_xreg_2023,
+                          h=1)
+
+cat("\nForecast Results for 2023:\n")
+cat("Point Forecast:", round(forecast_2023$mean, 2), "\n")
+cat("95% Confidence Interval:", 
+    round(forecast_2023$lower[,"95%"], 2), "to",
+    round(forecast_2023$upper[,"95%"], 2), "\n")
+
+actual_2023 <- 9
+
+cat("\nComparison with Actual 2023 Value:\n")
+cat("Predicted:", round(forecast_2023$mean, 2), "\n")
+cat("Actual:", round(actual_2023, 2), "\n")
+cat("Difference:", round(actual_2023 - forecast_2023$mean, 2), "\n")
+
+plot(forecast_2023, 
+     main="Luxury Market Growth Rate Forecast for 2023",
+     ylab="Growth Rate (%)",
+     xlab="Year")
+
+points(2023, actual_2023, pch=19, col="red")
+legend("topright", 
+       legend=c("Actual", "Forecast"), 
+       col=c("red", "blue"), 
+       pch=c(19, 19))
+
+prediction_error <- actual_2023 - forecast_2023$mean
+cat("\nPrediction Accuracy Metrics:\n")
+cat("Absolute Error:", round(abs(prediction_error), 2), "\n")
+cat("Percentage Error:", round(abs(prediction_error/actual_2023)*100, 2), "%\n")
+```
+
